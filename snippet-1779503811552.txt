@@ -1,0 +1,7 @@
+Repo: demo-user/awesome-project @ main
+Active file: src/index.js
+export function safeSum(a,b){
+  const x=Number(a), y=Number(b);
+  if(Number.isNaN(x)||Number.isNaN(y)) throw new Error(&#39;Invalid numbers&#39;);
+  return x+y;
+}
