@@ -1,0 +1,1166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- Playables SDK -->
+<script>// Playables SDK v1.0.0
+// Game lifecycle bridge: rAF-based game-ready detection + event communication
+(function() {
+  'use strict';
+
+  // Idempotency: skip if already initialized (e.g., server-side injection
+  // followed by client-side inject-javascript via the Bloks webview component).
+  if (window.playablesSDK) return;
+
+  var HANDLER_NAME = 'playablesGameEventHandler';
+  var ANDROID_BRIDGE_NAME = '_MetaPlayablesBridge';
+  var RAF_FRAME_THRESHOLD = 3;
+
+  var gameReadySent = false;
+  var firstInteractionSent = false;
+  var errorSent = false;
+  var frameCount = 0;
+  var originalRAF = window.requestAnimationFrame;
+
+  // --- Transport Layer ---
+
+  function hasIOSBridge() {
+    return !!(window.webkit &&
+              window.webkit.messageHandlers &&
+              window.webkit.messageHandlers[HANDLER_NAME]);
+  }
+
+  function hasAndroidBridge() {
+    return !!(window[ANDROID_BRIDGE_NAME] &&
+              typeof window[ANDROID_BRIDGE_NAME].postEvent === 'function');
+  }
+
+  function isInIframe() {
+    return !!(window.parent && window.parent !== window);
+  }
+
+  function sendEvent(eventName, payload) {
+    var message = {
+      type: eventName,
+      payload: payload || {},
+      timestamp: Date.now()
+    };
+
+    if (hasIOSBridge()) {
+      try {
+        window.webkit.messageHandlers[HANDLER_NAME].postMessage(message);
+      } catch (e) { /* ignore */ }
+      return;
+    }
+
+    if (hasAndroidBridge()) {
+    try {
+      var p = payload || {};
+      p.__secureToken = window.__fbAndroidBridgeAuthToken || '';
+      p.timestamp = message.timestamp;
+      window[ANDROID_BRIDGE_NAME].postEvent(
+        eventName,
+        JSON.stringify(p)
+      );
+    } catch (e) { /* ignore */ }
+    return;
+  }
+
+    if (isInIframe()) {
+      try {
+        window.parent.postMessage(message, '*');
+      } catch (e) { /* ignore */ }
+      return;
+    }
+  }
+
+  // --- rAF Game-Ready Detection ---
+
+  function onFrame() {
+    if (gameReadySent) return;
+
+    frameCount++;
+    if (frameCount >= RAF_FRAME_THRESHOLD) {
+      gameReadySent = true;
+      sendEvent('game_ready', {
+        frame_count: frameCount,
+        detected_at: Date.now()
+      });
+      return;
+    }
+
+    originalRAF.call(window, onFrame);
+  }
+
+  if (originalRAF) {
+    window.requestAnimationFrame = function(callback) {
+      if (!gameReadySent) {
+        return originalRAF.call(window, function(timestamp) {
+          frameCount++;
+          if (frameCount >= RAF_FRAME_THRESHOLD && !gameReadySent) {
+            gameReadySent = true;
+            sendEvent('game_ready', {
+              frame_count: frameCount,
+              detected_at: Date.now()
+            });
+          }
+          callback(timestamp);
+        });
+      }
+      return originalRAF.call(window, callback);
+    };
+  }
+
+  // --- First User Interaction Detection ---
+
+  function setupFirstInteractionDetection() {
+    var events = ['touchstart', 'mousedown', 'keydown'];
+
+    function onFirstInteraction() {
+      if (firstInteractionSent) return;
+      firstInteractionSent = true;
+      sendEvent('user_interaction_start', null);
+
+      for (var i = 0; i < events.length; i++) {
+        document.removeEventListener(events[i], onFirstInteraction, true);
+      }
+    }
+
+    for (var i = 0; i < events.length; i++) {
+      document.addEventListener(events[i], onFirstInteraction, true);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupFirstInteractionDetection);
+  } else {
+    setupFirstInteractionDetection();
+  }
+
+  // --- Auto Error Capture ---
+
+  window.addEventListener('error', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    sendEvent('error', {
+      message: event.message || 'Unknown error',
+      source: event.filename || '',
+      lineno: event.lineno || 0,
+      colno: event.colno || 0,
+      auto_captured: true
+    });
+  });
+
+  window.addEventListener('unhandledrejection', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    var reason = event.reason;
+    sendEvent('error', {
+      message: (reason instanceof Error) ? reason.message : String(reason),
+      type: 'unhandled_promise_rejection',
+      auto_captured: true
+    });
+  });
+
+  // --- Public API ---
+
+  window.playablesSDK = {
+    complete: function(score) {
+      sendEvent('game_ended', {
+        score: score,
+        completed: true
+      });
+    },
+
+    error: function(message) {
+      if (errorSent) return;
+      errorSent = true;
+      sendEvent('error', {
+        message: message || 'Unknown error',
+        auto_captured: false
+      });
+    },
+
+    sendEvent: function(eventName, payload) {
+      if (!eventName || typeof eventName !== 'string') return;
+      sendEvent(eventName, payload);
+    }
+  };
+
+  // Kick off rAF detection in case no game code calls rAF immediately
+  if (originalRAF) {
+    originalRAF.call(window, onFrame);
+  }
+})();</script>
+<!-- PLAYABLE_TOUCH_PATCH_V1 --><script>
+(function() {
+  if (window.__playableTouchPatchInstalled) return;
+  window.__playableTouchPatchInstalled = true;
+  var origAdd = EventTarget.prototype.addEventListener;
+  var blockedTypes = { touchstart: 1, touchmove: 1, wheel: 1 };
+  EventTarget.prototype.addEventListener = function(type, listener, options) {
+    if (blockedTypes[type]) {
+      if (options === undefined || options === null) {
+        options = { passive: true };
+      } else if (typeof options === 'boolean') {
+        options = { capture: options, passive: true };
+      } else {
+        options = Object.assign({}, options, { passive: true });
+      }
+    }
+    return origAdd.call(this, type, listener, options);
+  };
+})();
+</script><script>window.Intl=window.Intl||{};Intl.t=function(s){return(Intl._locale&&Intl._locale[s])||s;};</script>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Zack's Code Agent</title>
+<style>
+:root{
+  --bg:#020617;
+  --panel:#0f172a;
+  --panel-2:#111b2f;
+  --muted:#64748b;
+  --text:#e2e8f0;
+  --text-dim:#94a3b8;
+  --accent:#22d3ee;
+  --accent2:#a78bfa;
+  --ok:#10b981;
+  --warn:#f59e0b;
+  --danger:#ef4444;
+  --border:#1e293b;
+  --shadow:0 10px 30px rgba(0,0,0,.35);
+  --radius:16px;
+  --radius-sm:10px;
+  --font:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  background:radial-gradient(1200px 800px at 10% -10%, #0b1224 0%, var(--bg) 50%), var(--bg);
+  color:var(--text);
+  font-family:var(--font);
+  line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:var(--accent);text-decoration:none}
+button,input,textarea,select{
+  font-family:inherit;
+  font-size:14px;
+  color:var(--text);
+}
+button{
+  background:var(--panel-2);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:8px 12px;
+  cursor:pointer;
+  transition:.2s ease;
+}
+button:hover{border-color:#334155; transform:translateY(-1px)}
+button.primary{background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#001016; border:none; font-weight:600}
+button.ghost{background:transparent}
+button:disabled{opacity:.5;cursor:not-allowed}
+input,textarea,select{
+  background:#0b1426;
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:10px 12px;
+  outline:none;
+}
+input:focus,textarea:focus,select:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(34,211,238,.15)}
+.app{
+  display:grid;
+  grid-template-rows:64px 1fr;
+  height:100%;
+}
+.topbar{
+  display:flex;
+  align-items:center;
+  gap:16px;
+  padding:0 20px;
+  border-bottom:1px solid var(--border);
+  background:rgba(2,6,23,.7);
+  backdrop-filter:blur(10px);
+  position:sticky;
+  top:0;
+  z-index:20;
+}
+.logo{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  font-weight:700;
+  letter-spacing:.3px;
+}
+.logo-badge{
+  width:32px;height:32px;
+  border-radius:10px;
+  background:conic-gradient(from 0deg,var(--accent),var(--accent2),var(--accent));
+  display:grid;place-items:center;
+  color:#001016;
+  font-weight:900;
+}
+.status{
+  display:flex;align-items:center;gap:8px;
+  padding:6px 10px;border-radius:999px;background:#0b1426;border:1px solid var(--border);
+  font-size:13px;color:var(--text-dim);
+}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.dot.ok{background:var(--ok);box-shadow:0 0 10px var(--ok)}
+.spacer{flex:1}
+main{
+  display:grid;
+  grid-template-columns:320px 1fr 480px;
+  gap:16px;
+  padding:16px;
+  height:calc(100vh - 64px);
+}
+.panel{
+  background:linear-gradient(180deg,var(--panel),#0b1325);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow);
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+}
+.panel-header{
+  padding:14px 14px 12px;
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:10px;
+}
+.panel-title{font-weight:650; font-size:14px; letter-spacing:.3px}
+.panel-body{padding:12px; overflow:auto; flex:1; min-height:0}
+.panel-footer{padding:12px; border-top:1px solid var(--border)}
+
+/* GitHub */
+.github-user{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.avatar{width:36px;height:36px;border-radius:50%;background:#1e293b; object-fit:cover}
+.repo-select{display:grid;gap:8px;margin:8px 0}
+.file-tree{font-family:var(--mono);font-size:13px}
+.file-tree ul{list-style:none;padding-left:16px;margin:0;border-left:1px dashed #1e293b}
+.file-tree li{padding:3px 0; cursor:pointer; display:flex; align-items:center; gap:6px}
+.file-tree li:hover{color:var(--accent)}
+.file-tree .folder{color:var(--accent2)}
+.file-tree .file{color:var(--text-dim)}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:#0b1426;border:1px solid var(--border);font-size:12px;color:var(--text-dim)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+
+/* Chat */
+.chat-list{display:flex;flex-direction:column;gap:14px;padding:4px}
+.msg{display:flex;gap:10px;max-width:100%}
+.msg.user{justify-content:flex-end}
+.bubble{
+  max-width:85%;
+  background:#0b1426;
+  border:1px solid var(--border);
+  border-radius:16px;
+  padding:12px 14px;
+  position:relative;
+}
+.msg.user .bubble{
+  background:linear-gradient(135deg,rgba(34,211,238,.15),rgba(167,139,250,.15));
+  border-color:#1f2a44;
+}
+.msg .role{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:4px}
+.msg .content{font-size:14px;white-space:pre-wrap;word-wrap:break-word}
+.msg pre{
+  background:#020617;
+  border:1px solid #1e293b;
+  border-radius:12px;
+  padding:12px;
+  overflow:auto;
+  position:relative;
+  margin:10px 0;
+}
+.msg code{font-family:var(--mono);font-size:13px}
+.code-actions{
+  position:absolute;top:8px;right:8px;display:flex;gap:6px;
+}
+.code-actions button{padding:4px 8px;font-size:12px;border-radius:8px;background:#0f172a}
+.chat-input{
+  display:grid;grid-template-columns:1fr auto; gap:8px;
+  align-items:end;
+}
+.chat-input textarea{
+  resize:none; min-height:54px; max-height:150px;
+}
+.quick-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+
+/* Editor */
+.tabs{
+  display:flex;gap:6px;padding:8px;border-bottom:1px solid var(--border);overflow:auto;
+}
+.tab{
+  display:flex;align-items:center;gap:8px;
+  padding:6px 10px;
+  border-radius:10px;
+  background:#0b1426;border:1px solid var(--border);
+  font-size:13px;cursor:pointer;white-space:nowrap;
+}
+.tab.active{border-color:var(--accent); box-shadow:0 0 0 2px rgba(34,211,238,.15)}
+.tab .dot{width:6px;height:6px;background:var(--warn);display:none}
+.tab.dirty .dot{display:block}
+.editor-wrap{
+  display:grid;
+  grid-template-columns:auto 1fr;
+  flex:1;min-height:0;
+  background:#020617;
+}
+.gutter{
+  background:#081020;border-right:1px solid var(--border);
+  padding:10px 8px 10px 12px;
+  text-align:right;
+  color:#334155;
+  font-family:var(--mono);
+  font-size:13px;
+  line-height:1.6;
+  user-select:none;
+  overflow:hidden;
+}
+.editor{
+  width:100%;height:100%;
+  background:transparent;
+  border:none;
+  outline:none;
+  padding:10px 14px;
+  font-family:var(--mono);
+  font-size:13px;
+  line-height:1.6;
+  color:var(--text);
+  resize:none;
+  tab-size:2;
+  white-space:pre;
+  overflow:auto;
+}
+.editor-actions{
+  display:flex;gap:8px;align-items:center;
+  padding:10px;border-top:1px solid var(--border);
+  background:#0b1426;
+}
+
+/* Markdown */
+.md h1,.md h2,.md h3{margin:.6em 0 .3em}
+.md p{margin:.5em 0}
+.md ul{margin:.5em 0 .5em 1.2em}
+.md code{background:#020617;border:1px solid #1e293b;padding:2px 5px;border-radius:6px;font-family:var(--mono);font-size:13px}
+.md blockquote{border-left:3px solid var(--accent2);padding-left:10px;color:var(--text-dim);margin:8px 0}
+
+/* Modal */
+dialog{
+  border:none;border-radius:20px;
+  background:var(--panel);color:var(--text);
+  box-shadow:var(--shadow);
+  width:min(720px,92vw);
+  padding:0;overflow:hidden;
+}
+dialog::backdrop{background:rgba(0,0,0,.6);backdrop-filter:blur(4px)}
+.modal-head{padding:16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.modal-body{padding:16px;max-height:70vh;overflow:auto}
+.modal-foot{padding:14px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}
+
+/* Utilities */
+.row{display:flex;gap:8px;align-items:center}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.muted{color:var(--muted)}
+.small{font-size:12px}
+hr{border:none;border-top:1px solid var(--border);margin:12px 0}
+.scroll{scrollbar-width:thin;scrollbar-color:#334155 transparent}
+.scroll::-webkit-scrollbar{width:8px;height:8px}
+.scroll::-webkit-scrollbar-thumb{background:#334155;border-radius:999px}
+
+/* Responsive */
+@media (max-width:1200px){
+  main{grid-template-columns:300px 1fr 420px}
+}
+@media (max-width:1080px){
+  main{grid-template-columns:1fr; height:auto}
+  .panel{height:auto}
+  .app{grid-template-rows:auto}
+  .topbar{position:sticky}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <div class="logo">
+      <div class="logo-badge">Z</div>
+      <div>Zack's Code Agent</div>
+    </div>
+    <div class="status" id="ghStatus"><span class="dot" id="ghDot"></span><span id="ghStatusText">Offline Demo</span></div>
+    <div class="spacer"></div>
+    <button id="settingsBtn" class="ghost">⚙️ Settings</button>
+  </div>
+  <main>
+    <!-- LEFT: GitHub -->
+    <section class="panel" id="githubPanel">
+      <div class="panel-header">
+        <div class="panel-title">GitHub</div>
+        <div class="spacer"></div>
+        <button id="refreshBtn" class="ghost small">↻ Refresh</button>
+      </div>
+      <div class="panel-body scroll" id="githubBody"></div>
+      <div class="panel-footer">
+        <div class="row">
+          <button id="newFileBtn" class="ghost">＋ New File</button>
+          <button id="commitBtn" class="primary">Commit Changes</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- CENTER: Chat -->
+    <section class="panel" id="chatPanel">
+      <div class="panel-header">
+        <div class="panel-title">Agent Chat</div>
+        <div class="spacer"></div>
+        <div class="chip" id="modelChip">Mock Demo</div>
+      </div>
+      <div class="panel-body scroll" id="chatList">
+        <div class="chat-list" id="chatMessages"></div>
+      </div>
+      <div class="panel-footer">
+        <div class="chat-input">
+          <textarea id="chatInput" placeholder="Ask to write code, explain repo, fix bugs... (Shift+Enter for newline)"></textarea>
+          <button id="sendBtn" class="primary">Send ⏎</button>
+        </div>
+        <div class="quick-chips">
+          <button class="chip quick" data-prompt="Explain this repo structure and main files">Explain this repo</button>
+          <button class="chip quick" data-prompt="Write a clean function with tests for:">Write a function</button>
+          <button class="chip quick" data-prompt="Create a PR description for recent changes">Create PR description</button>
+          <button class="chip quick" data-prompt="Find and fix bugs in the current file">Fix bug</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- RIGHT: Code -->
+    <section class="panel" id="codePanel">
+      <div class="panel-header">
+        <div class="panel-title">Code Workspace</div>
+        <div class="spacer"></div>
+        <div class="small muted" id="fileInfo">No file open</div>
+      </div>
+      <div class="tabs scroll" id="tabs"></div>
+      <div class="editor-wrap" id="editorWrap" style="display:none">
+        <div class="gutter" id="gutter"></div>
+        <textarea id="editor" class="editor scroll" spellcheck="false"></textarea>
+      </div>
+      <div class="editor-actions">
+        <button id="formatBtn" class="ghost">Format</button>
+        <button id="saveBtn" class="ghost">Save to GitHub</button>
+        <div class="spacer"></div>
+        <span class="small muted" id="dirtyInfo"></span>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Settings Modal -->
+<dialog id="settingsDlg">
+  <div class="modal-head">
+    <strong>Settings</strong>
+    <button id="closeSettings" class="ghost">✕</button>
+  </div>
+  <div class="modal-body">
+    <div class="grid-2">
+      <div>
+        <label class="small muted">Model Provider</label>
+        <select id="providerSel">
+          <option value="mock">Mock Demo</option>
+          <option value="openai">OpenAI Compatible</option>
+        </select>
+      </div>
+      <div>
+        <label class="small muted">Model Name</label>
+        <input id="modelInput" placeholder="gpt-4o-mini" />
+      </div>
+    </div>
+    <div style="height:10px"></div>
+    <label class="small muted">API Base URL</label>
+    <input id="baseUrlInput" placeholder="https://api.openai.com/v1" />
+    <div style="height:10px"></div>
+    <label class="small muted">API Key</label>
+    <input id="apiKeyInput" type="password" placeholder="sk-..." />
+    <hr>
+    <h3 style="margin:0 0 8px">GitHub Token</h3>
+    <p class="small muted">Stored locally. Used for repo access. Leave empty to stay in demo mode.</p>
+    <input id="ghTokenInput" type="password" placeholder="ghp_..." />
+    <div style="height:10px"></div>
+    <button id="saveSettings" class="primary">Save Settings</button>
+  </div>
+</dialog>
+
+<!-- Commit Modal -->
+<dialog id="commitDlg">
+  <div class="modal-head"><strong>Commit Changes</strong><button id="closeCommit" class="ghost">✕</button></div>
+  <div class="modal-body">
+    <div id="commitPreview" class="small muted"></div>
+    <div style="height:10px"></div>
+    <label class="small muted">Commit message</label>
+    <input id="commitMsg" placeholder="Update files via Zack's Code Agent"/>
+  </div>
+  <div class="modal-foot">
+    <button id="cancelCommit" class="ghost">Cancel</button>
+    <button id="doCommit" class="primary">Commit & Push</button>
+  </div>
+</dialog>
+
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+  const $$ = s => Array.from(document.querySelectorAll(s));
+
+  // ---------- State ----------
+  const state = {
+    github: { token:null, user:null, repos:[], owner:null, repo:null, branch:'main', branches:[], tree:[], filesCache:{} },
+    tabs: [],
+    activePath:null,
+    dirty:new Set(),
+    messages:[],
+    settings:{ provider:'mock', model:'gpt-4o-mini', baseUrl:'https://api.openai.com/v1', apiKey:'' },
+    demo:true
+  };
+
+  // Load from localStorage
+  function loadStore(){
+    try{
+      state.github.token = localStorage.getItem('zack_gh_token') || null;
+      state.settings.provider = localStorage.getItem('zack_provider') || 'mock';
+      state.settings.model = localStorage.getItem('zack_model') || 'gpt-4o-mini';
+      state.settings.baseUrl = localStorage.getItem('zack_base') || 'https://api.openai.com/v1';
+      state.settings.apiKey = localStorage.getItem('zack_key') || '';
+      const msgs = localStorage.getItem('zack_msgs');
+      if(msgs) state.messages = JSON.parse(msgs);
+    }catch{}
+  }
+  function saveStore(){
+    try{
+      if(state.github.token) localStorage.setItem('zack_gh_token', state.github.token);
+      else localStorage.removeItem('zack_gh_token');
+      localStorage.setItem('zack_provider', state.settings.provider);
+      localStorage.setItem('zack_model', state.settings.model);
+      localStorage.setItem('zack_base', state.settings.baseUrl);
+      localStorage.setItem('zack_key', state.settings.apiKey);
+      localStorage.setItem('zack_msgs', JSON.stringify(state.messages.slice(-100)));
+    }catch{}
+  }
+  loadStore();
+
+  // ---------- DOM ----------
+  const ghStatusText = $('#ghStatusText'), ghDot = $('#ghDot');
+  const githubBody = $('#githubBody');
+  const chatMessages = $('#chatMessages'), chatInput = $('#chatInput'), sendBtn = $('#sendBtn'), modelChip = $('#modelChip');
+  const tabsEl = $('#tabs'), editor = $('#editor'), gutter = $('#gutter'), editorWrap = $('#editorWrap'), fileInfo = $('#fileInfo'), dirtyInfo = $('#dirtyInfo');
+  const settingsDlg = $('#settingsDlg'), providerSel = $('#providerSel'), modelInput = $('#modelInput'), baseUrlInput = $('#baseUrlInput'), apiKeyInput = $('#apiKeyInput'), ghTokenInput = $('#ghTokenInput');
+  const commitDlg = $('#commitDlg'), commitPreview = $('#commitPreview'), commitMsg = $('#commitMsg');
+
+  // ---------- Utilities ----------
+  const esc = s => s.replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
+  const b64 = {
+    enc: str => btoa(unescape(encodeURIComponent(str))),
+    dec: str => decodeURIComponent(escape(atob(str.replace(/\s/g,''))))
+  };
+  function fmtBytes(n){ if(n<1024) return n+' B'; return (n/1024).toFixed(1)+' KB' }
+
+  // Minimal markdown + code blocks
+  function renderMarkdown(md){
+    let html = esc(md);
+    // code fences
+    html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, (_,lang,code)=>{
+      const highlighted = highlightCode(code.trimEnd(), lang||'');
+      const id = 'code-'+Math.random().toString(36).slice(2);
+      return `<pre data-code-id="${id}"><div class="code-actions"><button data-copy="${id}">Copy</button><button data-insert="${id}">Insert</button></div><code class="lang-${lang||''}">${highlighted}</code></pre><textarea id="${id}" style="display:none">${esc(code.trimEnd())}</textarea>`;
+    });
+    html = html.replace(/`([^`]+)`/g,'<code>$1</code>');
+    html = html.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+    html = html.replace(/\*([^*]+)\*/g,'<em>$1</em>');
+    html = html.replace(/^### (.+)$/gm,'<h3>$1</h3>');
+    html = html.replace(/^## (.+)$/gm,'<h2>$1</h2>');
+    html = html.replace(/^# (.+)$/gm,'<h1>$1</h1>');
+    html = html.replace(/\n{2,}/g,'</p><p>');
+    html = '<div class="md"><p>'+html+'</p></div>';
+    return html;
+  }
+
+  function highlightCode(code, lang){
+    // very small keyword highlighter
+    let h = esc(code);
+    const kws = {
+      js:['const','let','var','function','return','if','else','for','while','class','import','export','async','await','new','try','catch'],
+      py:['def','return','if','elif','else','for','while','class','import','from','async','await','try','except'],
+      ts:['interface','type','const','let','function','return','if','else']
+    };
+    const list = [...(kws.js||[]),...(kws.py||[]),...(kws.ts||[])];
+    const re = new RegExp('\\b('+list.join('|')+')\\b','g');
+    h = h.replace(re,'<span style="color:var(--accent2)">$1</span>');
+    h = h.replace(/("[^"]*"|'[^']*'|`[^`]*`)/g,'<span style="color:#7dd3fc">$1</span>');
+    h = h.replace(/\b(\d+)\b/g,'<span style="color:#fbbf24">$1</span>');
+    h = h.replace(/(\/\/.*$)/gm,'<span style="color:#64748b">$1</span>');
+    return h;
+  }
+
+  // ---------- GitHub ----------
+  async function ghFetch(path, opts={}){
+    if(!state.github.token) throw new Error('No token');
+    const res = await fetch('https://api.github.com'+path, {
+      ...opts,
+      headers:{ 'Authorization':'Bearer '+state.github.token, 'Accept':'application/vnd.github+json', ...(opts.headers||{}) }
+    });
+    if(!res.ok) throw new Error('GitHub '+res.status);
+    return res.json();
+  }
+  async function initGitHub(){
+    state.demo = !state.github.token;
+    if(state.demo){
+      ghDot.className='dot';
+      ghStatusText.textContent='Offline Demo';
+      state.github.user = { login:'demo-user', name:'Demo User', avatar_url:'' };
+      state.github.repos = [{ name:'awesome-project', full_name:'demo-user/awesome-project', private:false }];
+      state.github.owner='demo-user'; state.github.repo='awesome-project'; state.github.branch='main';
+      state.github.branches=[{name:'main'}];
+      state.github.tree=[
+        {path:'README.md',type:'blob',size:432},
+        {path:'src',type:'tree'},
+        {path:'src/index.js',type:'blob',size:1234},
+        {path:'src/utils.js',type:'blob',size:856},
+        {path:'package.json',type:'blob',size:312}
+      ];
+      state.github.filesCache['README.md']='# Awesome Project\n\nDemo repo for Zack\'s Code Agent.';
+      state.github.filesCache['src/index.js']='// entry\nconst greet = name => `Hello ${name}`;\nconsole.log(greet("Zack"));\n';
+      state.github.filesCache['src/utils.js']='export const sum = (a,b)=>a+b;\n';
+      state.github.filesCache['package.json']='{\n  "name":"awesome-project",\n  "version":"0.1.0"\n}\n';
+      renderGitHub();
+      return;
+    }
+    try{
+      ghDot.className='dot ok';
+      ghStatusText.textContent='Connecting...';
+      const user = await ghFetch('/user');
+      state.github.user = user;
+      const repos = await ghFetch('/user/repos?per_page=100&sort=updated');
+      state.github.repos = repos;
+      ghStatusText.textContent=`${user.login} ✓`;
+      if(repos.length){
+        const [owner,repo] = repos[0].full_name.split('/');
+        selectRepo(owner,repo);
+      }
+    }catch(e){
+      ghDot.className='dot';
+      ghStatusText.textContent='GitHub error';
+      console.error(e);
+    }
+    renderGitHub();
+  }
+  async function selectRepo(owner,repo){
+    state.github.owner=owner; state.github.repo=repo;
+    try{
+      const branches = await ghFetch(`/repos/${owner}/${repo}/branches?per_page=100`);
+      state.github.branches = branches;
+      state.github.branch = branches.find(b=>b.name==='main'||b.name==='master')?.name || branches[0]?.name || 'main';
+      await loadTree();
+    }catch(e){ console.error(e) }
+    renderGitHub();
+  }
+  async function loadTree(){
+    if(state.demo) return;
+    const {owner,repo,branch} = state.github;
+    const data = await ghFetch(`/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`);
+    state.github.tree = data.tree.filter(t=>t.type==='blob' || t.type==='tree').map(t=>({path:t.path,type:t.type,size:t.size||0}));
+  }
+  async function openFile(path){
+    if(state.github.filesCache[path]){
+      addTab(path, state.github.filesCache[path]);
+      return;
+    }
+    if(state.demo){
+      addTab(path, '// file not found in demo');
+      return;
+    }
+    const {owner,repo,branch} = state.github;
+    try{
+      const data = await ghFetch(`/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${branch}`);
+      const content = data.content ? b64.dec(data.content) : '';
+      state.github.filesCache[path]=content;
+      addTab(path,content,data.sha);
+    }catch(e){
+      addTab(path, `// Error loading ${path}\n// ${e.message}`);
+    }
+  }
+  function treeToNested(items){
+    const root={};
+    items.forEach(it=>{
+      const parts=it.path.split('/');
+      let cur=root;
+      parts.forEach((p,i)=>{
+        if(!cur[p]) cur[p]={__meta:null,__children:{}};
+        if(i===parts.length-1) cur[p].__meta=it;
+        cur=cur[p].__children;
+      });
+    });
+    return root;
+  }
+  function renderTree(node, base=''){
+    const ul=document.createElement('ul');
+    Object.keys(node).sort((a,b)=>{
+      const aDir=Object.keys(node[a].__children).length>0;
+      const bDir=Object.keys(node[b].__children).length>0;
+      return aDir===bDir? a.localeCompare(b) : aDir?-1:1;
+    }).forEach(name=>{
+      const meta=node[name].__meta;
+      const path=base? base+'/'+name:name;
+      const li=document.createElement('li');
+      const isDir=Object.keys(node[name].__children).length>0 && (!meta || meta.type==='tree');
+      li.innerHTML=`<span>${isDir?'📁':'📄'}</span><span class="${isDir?'folder':'file'}">${esc(name)}</span>${meta?.size?`<span class="small muted"> ${fmtBytes(meta.size)}</span>`:''}`;
+      li.onclick=e=>{ e.stopPropagation(); if(isDir){ li.classList.toggle('open'); } else { openFile(path); } };
+      if(isDir){
+        const child=renderTree(node[name].__children,path);
+        li.appendChild(child);
+      }
+      ul.appendChild(li);
+    });
+    return ul;
+  }
+  function renderGitHub(){
+    githubBody.innerHTML='';
+    if(!state.github.user){
+      githubBody.innerHTML=`<div class="small muted">Connect GitHub in Settings to load repos.</div>`;
+      return;
+    }
+    const userDiv=document.createElement('div');
+    userDiv.className='github-user';
+    userDiv.innerHTML=`<img class="avatar" src="${state.github.user.avatar_url||'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 fill=%22%231e293b%22/><text x=%2250%22 y=%2258%22 font-size=%2250%22 text-anchor=%22middle%22 fill=%22%2364748b%22>Z</text></svg>'}" alt="avatar"><div><div style="font-weight:600">${esc(state.github.user.name||state.github.user.login)}</div><div class="small muted">@${esc(state.github.user.login)}</div></div>`;
+    githubBody.appendChild(userDiv);
+
+    const repoSel=document.createElement('div');
+    repoSel.className='repo-select';
+    repoSel.innerHTML=`<label class="small muted">Repository</label>`;
+    const sel=document.createElement('select');
+    sel.innerHTML=state.github.repos.map(r=>`<option value="${r.full_name}" ${state.github.repo&&r.full_name===`${state.github.owner}/${state.github.repo}`?'selected':''}>${esc(r.full_name)} ${r.private?'🔒':''}</option>`).join('');
+    sel.onchange=()=>{ const [o,r]=sel.value.split('/'); selectRepo(o,r); };
+    repoSel.appendChild(sel);
+
+    const branchSel=document.createElement('div');
+    branchSel.innerHTML=`<label class="small muted">Branch</label>`;
+    const bsel=document.createElement('select');
+    bsel.innerHTML=state.github.branches.map(b=>`<option ${b.name===state.github.branch?'selected':''}>${esc(b.name)}</option>`).join('');
+    bsel.onchange=()=>{ state.github.branch=bsel.value; loadTree().then(renderGitHub); };
+    branchSel.appendChild(bsel);
+
+    const grid=document.createElement('div');
+    grid.className='grid-2';
+    grid.appendChild(repoSel);
+    grid.appendChild(branchSel);
+    githubBody.appendChild(grid);
+
+    const treeWrap=document.createElement('div');
+    treeWrap.className='file-tree';
+    treeWrap.style.marginTop='12px';
+    if(state.github.tree.length){
+      const nested=treeToNested(state.github.tree);
+      treeWrap.appendChild(renderTree(nested));
+    }else{
+      treeWrap.innerHTML=`<div class="small muted">No files</div>`;
+    }
+    githubBody.appendChild(treeWrap);
+  }
+
+  // ---------- Tabs & Editor ----------
+  function addTab(path, content, sha){
+    let tab=state.tabs.find(t=>t.path===path);
+    if(!tab){ tab={path,content,original:content,sha}; state.tabs.push(tab); }
+    state.activePath=path;
+    renderTabs();
+    openInEditor(tab);
+  }
+  function renderTabs(){
+    tabsEl.innerHTML='';
+    state.tabs.forEach(t=>{
+      const el=document.createElement('div');
+      el.className='tab'+(t.path===state.activePath?' active':'')+(state.dirty.has(t.path)?' dirty':'');
+      el.innerHTML=`<span class="dot"></span><span>${esc(t.path.split('/').pop())}</span><span class="small muted"> ${esc(t.path.includes('/')? t.path.split('/').slice(0,-1).join('/') : '')}</span>`;
+      el.onclick=()=>{ state.activePath=t.path; renderTabs(); openInEditor(t); };
+      el.oncontextmenu=e=>{ e.preventDefault(); closeTab(t.path); };
+      tabsEl.appendChild(el);
+    });
+  }
+  function openInEditor(tab){
+    editorWrap.style.display='grid';
+    editor.value=tab.content;
+    fileInfo.textContent=`${tab.path} • ${fmtBytes(new Blob([tab.content]).size)}`;
+    updateDirtyInfo();
+    updateGutter();
+    editor.focus();
+  }
+  function closeTab(path){
+    state.tabs=state.tabs.filter(t=>t.path!==path);
+    state.dirty.delete(path);
+    if(state.activePath===path) state.activePath=state.tabs[0]?.path||null;
+    renderTabs();
+    if(state.activePath){
+      openInEditor(state.tabs.find(t=>t.path===state.activePath));
+    }else{
+      editorWrap.style.display='none';
+      fileInfo.textContent='No file open';
+    }
+  }
+  function updateGutter(){
+    const lines=editor.value.split('\n').length;
+    gutter.innerHTML=Array.from({length:lines},(_,i)=>`<div>${i+1}</div>`).join('');
+  }
+  function updateDirtyInfo(){
+    const tab=state.tabs.find(t=>t.path===state.activePath);
+    if(!tab) return;
+    const dirty=tab.content!==tab.original;
+    dirtyInfo.textContent = dirty ? '• Unsaved changes' : 'Saved';
+  }
+  editor.addEventListener('input',()=>{
+    const tab=state.tabs.find(t=>t.path===state.activePath);
+    if(!tab) return;
+    tab.content=editor.value;
+    if(tab.content!==tab.original) state.dirty.add(tab.path); else state.dirty.delete(tab.path);
+    renderTabs();
+    updateDirtyInfo();
+    updateGutter();
+  });
+  editor.addEventListener('scroll',()=>{ gutter.scrollTop=editor.scrollTop; });
+  $('#formatBtn').onclick=()=>{
+    const tab=state.tabs.find(t=>t.path===state.activePath);
+    if(!tab) return;
+    // naive format: trim trailing spaces
+    const formatted=tab.content.split('\n').map(l=>l.replace(/[ \t]+$/,'')).join('\n');
+    tab.content=formatted;
+    editor.value=formatted;
+    updateDirtyInfo();
+    updateGutter();
+  };
+  $('#saveBtn').onclick=()=> saveFile();
+
+  async function saveFile(){
+    const tab=state.tabs.find(t=>t.path===state.activePath);
+    if(!tab) return;
+    state.github.filesCache[tab.path]=tab.content;
+    if(state.demo){
+      tab.original=tab.content;
+      state.dirty.delete(tab.path);
+      renderTabs(); updateDirtyInfo();
+      pushAgent(`Saved **${tab.path}** to demo workspace. (GitHub not connected)`);
+      return;
+    }
+    try{
+      const {owner,repo,branch}=state.github;
+      const path=tab.path;
+      // get sha
+      let sha=tab.sha;
+      if(!sha){
+        try{
+          const data=await ghFetch(`/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${branch}`);
+          sha=data.sha;
+        }catch{}
+      }
+      await ghFetch(`/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`,{
+        method:'PUT',
+        body:JSON.stringify({
+          message:`Update ${path} via Zack's Code Agent`,
+          content:b64.enc(tab.content),
+          branch,
+          ...(sha?{sha}:{})
+        })
+      });
+      tab.original=tab.content;
+      state.dirty.delete(tab.path);
+      renderTabs(); updateDirtyInfo();
+      pushAgent(`Committed **${path}** to \`${owner}/${repo}@${branch}\`.`);
+    }catch(e){
+      alert('Save failed: '+e.message);
+    }
+  }
+
+  // ---------- Chat ----------
+  function renderChat(){
+    chatMessages.innerHTML='';
+    state.messages.forEach(m=>{
+      const div=document.createElement('div');
+      div.className='msg '+(m.role==='user'?'user':'agent');
+      div.innerHTML=`<div class="bubble"><div class="role">${m.role==='user'?'You':'Agent'}</div><div class="content">${renderMarkdown(m.content)}</div></div>`;
+      chatMessages.appendChild(div);
+    });
+    // bind code actions
+    chatMessages.querySelectorAll('button[data-copy]').forEach(btn=>{
+      btn.onclick=()=>{
+        const id=btn.getAttribute('data-copy');
+        const txt=$('#'+id).value;
+        navigator.clipboard.writeText(txt).then(()=>{ btn.textContent='Copied!'; setTimeout(()=>btn.textContent='Copy',1200); });
+      };
+    });
+    chatMessages.querySelectorAll('button[data-insert]').forEach(btn=>{
+      btn.onclick=()=>{
+        const id=btn.getAttribute('data-insert');
+        const txt=$('#'+id).value;
+        const tab=state.tabs.find(t=>t.path===state.activePath);
+        if(tab){
+          const start=editor.selectionStart;
+          const end=editor.selectionEnd;
+          editor.setRangeText(txt+'\n', start, end, 'end');
+          editor.dispatchEvent(new Event('input'));
+        }else{
+          addTab('snippet-'+Date.now()+'.txt', txt);
+        }
+      };
+    });
+    chatMessages.parentElement.scrollTop=chatMessages.parentElement.scrollHeight;
+  }
+  function pushUser(content){
+    state.messages.push({role:'user',content});
+    renderChat(); saveStore();
+  }
+  function pushAgent(content){
+    state.messages.push({role:'agent',content});
+    renderChat(); saveStore();
+  }
+  async function sendMessage(){
+    const text=chatInput.value.trim();
+    if(!text) return;
+    pushUser(text);
+    chatInput.value='';
+    modelChip.textContent = state.settings.provider==='mock' ? 'Mock Demo' : state.settings.model;
+    // generate response
+    if(state.settings.provider==='mock'){
+      setTimeout(()=>{ pushAgent(mockResponse(text)); }, 400);
+    }else{
+      pushAgent('_Thinking..._');
+      try{
+        const resp = await callOpenAI(text);
+        state.messages.pop(); // remove thinking
+        pushAgent(resp);
+      }catch(e){
+        state.messages.pop();
+        pushAgent(`**Error:** ${e.message}`);
+      }
+    }
+  }
+  $('#sendBtn').onclick=sendMessage;
+  chatInput.addEventListener('keydown',e=>{
+    if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendMessage(); }
+  });
+  $$('.quick').forEach(b=> b.onclick=()=>{ chatInput.value=b.dataset.prompt+' '; chatInput.focus(); });
+
+  function mockResponse(userText){
+    const repo=state.github.repo||'awesome-project';
+    const file=state.activePath||'src/index.js';
+    const ctx = `Repo: ${state.github.owner}/${repo} @ ${state.github.branch}\nActive file: ${file}\n`;
+    const lower=userText.toLowerCase();
+    if(lower.includes('explain')){
+      return `Here's a quick overview of **${repo}**:\n\n- \`README.md\` – project intro\n- \`src/index.js\` – entry point with greet function\n- \`src/utils.js\` – helper exports\n- \`package.json\` – metadata\n\n${ctx}\nWant me to generate a diagram or dive into a specific file?`;
+    }
+    if(lower.includes('write a function')){
+      return `Added a clean utility to \`${file}\`:\n\n\`\`\`js
+// debounce utility
+export function debounce(fn, wait=300){
+  let t;
+  return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), wait); };
+}
+\`\`\`\nClick **Insert** to add it to your editor.`;
+    }
+    if(lower.includes('pr description')){
+      return `**PR Title:** feat: add debounce utility and greet polish\n\n**Description:**\n- Introduces \`debounce\` helper for input handling\n- Refactors greet to use template literals\n- Updates README with usage\n\n**Checklist:**\n- [x] Tests pass\n- [x] Docs updated\n\n${ctx}`;
+    }
+    if(lower.includes('fix bug')){
+      return `I scanned \`${file}\` and found a potential issue: missing error handling.\n\n\`\`\`js
+export function safeSum(a,b){
+  const x=Number(a), y=Number(b);
+  if(Number.isNaN(x)||Number.isNaN(y)) throw new Error('Invalid numbers');
+  return x+y;
+}
+\`\`\`\nInsert it and replace raw \`sum\` calls.`;
+    }
+    return `Got it! I can help with \`${repo}\`.\n\nCurrent context:\n\`\`\`
+${ctx}
+\`\`\`\nTry quick chips below or ask me to generate code. I can also commit changes for you.`;
+  }
+
+  async function callOpenAI(userText){
+    const {baseUrl,apiKey,model}=state.settings;
+    if(!apiKey) throw new Error('API key missing');
+    const sys=`You are Zack's personal coding agent. You write code, explain code, help with GitHub. Be concise. Repo: ${state.github.owner}/${state.github.repo} Branch: ${state.github.branch} Active file: ${state.activePath||'none'}.`;
+    const messages=[
+      {role:'system',content:sys},
+      ...state.messages.slice(-12).map(m=>({role:m.role==='agent'?'assistant':m.role,content:m.content})),
+      {role:'user',content:userText}
+    ];
+    const res=await fetch(baseUrl.replace(/\/$/,'')+'/chat/completions',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+apiKey},
+      body:JSON.stringify({model,messages,temperature:0.3})
+    });
+    if(!res.ok) throw new Error('API '+res.status);
+    const data=await res.json();
+    return data.choices?.[0]?.message?.content || '(empty response)';
+  }
+
+  // ---------- Settings ----------
+  $('#settingsBtn').onclick=()=>{
+    providerSel.value=state.settings.provider;
+    modelInput.value=state.settings.model;
+    baseUrlInput.value=state.settings.baseUrl;
+    apiKeyInput.value=state.settings.apiKey;
+    ghTokenInput.value=state.github.token||'';
+    settingsDlg.showModal();
+  };
+  $('#closeSettings').onclick=()=>settingsDlg.close();
+  $('#saveSettings').onclick=()=>{
+    state.settings.provider=providerSel.value;
+    state.settings.model=modelInput.value.trim()||'gpt-4o-mini';
+    state.settings.baseUrl=baseUrlInput.value.trim()||'https://api.openai.com/v1';
+    state.settings.apiKey=apiKeyInput.value.trim();
+    const newToken=ghTokenInput.value.trim();
+    state.github.token=newToken||null;
+    saveStore();
+    modelChip.textContent = state.settings.provider==='mock' ? 'Mock Demo' : state.settings.model;
+    settingsDlg.close();
+    initGitHub();
+  };
+
+  // ---------- Commit ----------
+  $('#commitBtn').onclick=()=>{
+    if(state.dirty.size===0){ alert('No changes to commit'); return; }
+    const files=[...state.dirty].join(', ');
+    commitPreview.innerHTML=`Will commit <strong>${state.dirty.size}</strong> file(s):<br><code>${esc(files)}</code>`;
+    commitMsg.value=`Update ${[...state.dirty].map(p=>p.split('/').pop()).join(', ')} via Zack's Code Agent`;
+    commitDlg.showModal();
+  };
+  $('#closeCommit').onclick=()=>commitDlg.close();
+  $('#cancelCommit').onclick=()=>commitDlg.close();
+  $('#doCommit').onclick=async ()=>{
+    commitDlg.close();
+    for(const path of [...state.dirty]){
+      const tab=state.tabs.find(t=>t.path===path);
+      if(tab){ state.activePath=path; await saveFile(); }
+    }
+    pushAgent(`✅ Pushed ${state.dirty.size} file(s) with message: "${commitMsg.value}"`);
+  };
+
+  // ---------- New File ----------
+  $('#newFileBtn').onclick=()=>{
+    const name=prompt('New file path (e.g. src/new.js):');
+    if(!name) return;
+    addTab(name,'// new file\n');
+  };
+  $('#refreshBtn').onclick=()=>initGitHub();
+
+  // ---------- Init ----------
+  function init(){
+    modelChip.textContent = state.settings.provider==='mock' ? 'Mock Demo' : state.settings.model;
+    if(state.messages.length===0){
+      state.messages.push({role:'agent',content:'Hey Zack! I\'m your Code Agent.\n\nI can:\n- Read/write your GitHub repos\n- Explain code and write functions\n- Generate PR descriptions\n- Commit changes\n\nConnect your GitHub token in Settings or use demo mode. What do you want to build?'});
+    }
+    renderChat();
+    initGitHub();
+    renderTabs();
+  }
+  init();
+})();
+</script>
+</body>
+</html>
